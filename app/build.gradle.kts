@@ -30,6 +30,16 @@ android {
             )
         }
     }
+
+    // 自定义 APK 输出文件名 → EvidKeeper-v1.0-release.apk
+    applicationVariants.all {
+        outputs.all {
+            (this as? com.android.build.gradle.internal.api.ApkVariantOutputImpl)?.let {
+                it.outputFileName = "EvidKeeper-v${defaultConfig.versionName}-$name.apk"
+            }
+        }
+    }
+
     compileOptions {
         sourceCompatibility = JavaVersion.VERSION_1_8
         targetCompatibility = JavaVersion.VERSION_1_8
