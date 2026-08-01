@@ -25,7 +25,10 @@ fun CreateScreen(
     val year by viewModel.year.collectAsState()
     val month by viewModel.month.collectAsState()
     val selectedFileName by viewModel.selectedFileName.collectAsState()
+    val selectedFileUri by viewModel.selectedFileUri.collectAsState()
     val done by viewModel.done.collectAsState()
+    val isGenerating by viewModel.isGenerating.collectAsState()
+    val aiError by viewModel.aiError.collectAsState()
     val context = LocalContext.current
 
     var showTimePicker by remember { mutableStateOf(false) }
@@ -40,10 +43,17 @@ fun CreateScreen(
         }
     }
 
+    // AI 错误提示
+    LaunchedEffect(aiError) {
+        aiError?.let {
+            Toast.makeText(context, it, Toast.LENGTH_SHORT).show()
+            viewModel.clearAiError()
+        }
+    }
+
     // 选择文件
     val filePicker = rememberLauncherForActivityResult(ActivityResultContracts.OpenDocument()) { uri ->
         if (uri != null) {
-            // 获取文件名
             var displayName = "已选文件"
             context.contentResolver.query(uri, null, null, null, null)?.use { cursor ->
                 if (cursor.moveToFirst()) {
@@ -87,7 +97,6 @@ fun CreateScreen(
                 Spacer(modifier = Modifier.width(8.dp))
                 Text(if (selectedFileName != null) "更换文件" else "添加文件（可选）")
             }
-            // 文件预览
             selectedFileName?.let { fileName ->
                 Text(
                     "已选：$fileName",
@@ -108,12 +117,23 @@ fun CreateScreen(
                     supportingText = errorMsg?.let { err -> { Text(err) } },
                 )
                 Spacer(modifier = Modifier.width(8.dp))
-                // AI 按钮（占位，始终禁用——步骤 7 接通）
+                // AI 按钮
+                val canGenerate = selectedFileUri != null && !isGenerating
                 Button(
-                    onClick = { /* 步骤 7 实现 */ },
-                    enabled = false,
+                    onClick = { viewModel.generateName(context) },
+                    enabled = canGenerate,
                 ) {
-                    Text("AI 生成")
+                    if (isGenerating) {
+                        CircularProgressIndicator(
+                            modifier = Modifier.size(16.dp),
+                            strokeWidth = 2.dp,
+                            color = MaterialTheme.colorScheme.onPrimary,
+                        )
+                        Spacer(modifier = Modifier.width(4.dp))
+                        Text("生成中…")
+                    } else {
+                        Text("AI 生成")
+                    }
                 }
             }
 
