@@ -77,6 +77,9 @@ dependencies {
     // EncryptedSharedPreferences（安全存储 API Key）
     implementation(libs.androidx.security.crypto)
 
+    // DocumentFile（SAF 文件操作）
+    implementation(libs.androidx.documentfile)
+
     // Coil（图片缩略图加载）
     implementation(libs.coil.compose)
 
