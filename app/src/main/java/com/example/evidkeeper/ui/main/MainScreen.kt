@@ -62,11 +62,6 @@ fun MainScreen(
     // ── 搜索文本（UI 可用但不影响列表——步骤 6 才接入过滤） ──
     var searchQuery by remember { mutableStateOf("") }
 
-    // ── 快速创建对话框（临时，步骤 5 替换为完整新建页） ──
-    var showQuickCreate by remember { mutableStateOf(false) }
-    var quickCreateName by remember { mutableStateOf("") }
-    var quickCreateError by remember { mutableStateOf<String?>(null) }
-
     // ── 长按菜单 ──
     var menuExpanded by remember { mutableStateOf(false) }
     var menuTargetItem by remember { mutableStateOf<Item?>(null) }
@@ -97,11 +92,7 @@ fun MainScreen(
                     singleLine = true,
                 )
                 Spacer(modifier = Modifier.width(4.dp))
-                IconButton(onClick = {
-                    quickCreateName = ""
-                    quickCreateError = null
-                    showQuickCreate = true
-                }) {
+                IconButton(onClick = onOpenCreate) {
                     Icon(Icons.Default.Add, contentDescription = "新建事项")
                 }
                 IconButton(onClick = onOpenSettings) {
@@ -242,63 +233,6 @@ fun MainScreen(
         )
     }
 
-    // ── 快速创建对话框（临时，步骤 5 替换） ──
-    if (showQuickCreate) {
-        val cal = java.util.Calendar.getInstance()
-        val currentYear = cal.get(java.util.Calendar.YEAR)
-        val currentMonth = cal.get(java.util.Calendar.MONTH) + 1
-
-        AlertDialog(
-            onDismissRequest = {
-                showQuickCreate = false
-                quickCreateError = null
-            },
-            title = { Text("新建事项") },
-            text = {
-                Column {
-                    Text(
-                        "时间：${currentYear}年${currentMonth}月",
-                        color = MaterialTheme.colorScheme.onSurfaceVariant,
-                    )
-                    Spacer(modifier = Modifier.height(8.dp))
-                    OutlinedTextField(
-                        value = quickCreateName,
-                        onValueChange = { quickCreateName = it },
-                        label = { Text("事项名称") },
-                        singleLine = true,
-                        isError = quickCreateError != null,
-                        supportingText = quickCreateError?.let { err -> { Text(err) } },
-                    )
-                }
-            },
-            confirmButton = {
-                TextButton(onClick = {
-                    val trimmed = quickCreateName.trim()
-                    if (trimmed.isEmpty()) {
-                        quickCreateError = "名称不能为空"
-                        return@TextButton
-                    }
-                    if (trimmed.any { it in illegalChars }) {
-                        quickCreateError = "名称不能包含这些字符：\\ / : * ? \" < > |"
-                        return@TextButton
-                    }
-                    val created = viewModel.quickCreate(trimmed)
-                    if (created != null) {
-                        showQuickCreate = false
-                        quickCreateError = null
-                    } else {
-                        quickCreateError = "创建失败，请检查存储目录是否已设置"
-                    }
-                }) { Text("创建") }
-            },
-            dismissButton = {
-                TextButton(onClick = {
-                    showQuickCreate = false
-                    quickCreateError = null
-                }) { Text("取消") }
-            },
-        )
-    }
 }
 
 // ═══════════════════════════════════════════════════════════

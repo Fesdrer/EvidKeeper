@@ -15,15 +15,17 @@ import androidx.navigation.navArgument
 import com.example.evidkeeper.data.settings.SettingsStore
 import com.example.evidkeeper.data.storage.StorageManager
 import com.example.evidkeeper.ui.create.CreateScreen
+import com.example.evidkeeper.ui.create.CreateViewModel
 import com.example.evidkeeper.ui.detail.DetailScreen
+import com.example.evidkeeper.ui.detail.DetailViewModel
 import com.example.evidkeeper.ui.main.MainScreen
 import com.example.evidkeeper.ui.main.MainViewModel
 import com.example.evidkeeper.ui.settings.SettingsScreen
+import com.example.evidkeeper.ui.settings.SettingsViewModel
 import com.example.evidkeeper.ui.theme.EvidKeeperTheme
 
 class MainActivity : ComponentActivity() {
 
-    // 全局存储实例（后续步骤可移到 Application 或 DI）
     private val settingsStore by lazy { SettingsStore(this) }
     private val storageManager by lazy { StorageManager(this, settingsStore) }
 
@@ -31,7 +33,8 @@ class MainActivity : ComponentActivity() {
         super.onCreate(savedInstanceState)
         enableEdgeToEdge()
 
-        val sm = storageManager  // 捕获引用供 Composable 内使用
+        val sm = storageManager
+        val ss = settingsStore
 
         setContent {
             EvidKeeperTheme {
@@ -40,7 +43,7 @@ class MainActivity : ComponentActivity() {
                     navController = navController,
                     startDestination = "main",
                 ) {
-                    // 主页面
+                    // ── 主页面 ──
                     composable("main") {
                         val vm: MainViewModel = viewModel(
                             factory = object : ViewModelProvider.Factory {
@@ -58,28 +61,54 @@ class MainActivity : ComponentActivity() {
                         )
                     }
 
-                    // 事项详情页（占位，步骤 4 实现）
+                    // ── 事项详情页 ──
                     composable(
                         "detail/{itemId}",
                         arguments = listOf(navArgument("itemId") { type = NavType.IntType }),
                     ) { backStackEntry ->
                         val itemId = backStackEntry.arguments?.getInt("itemId") ?: 0
+                        val vm: DetailViewModel = viewModel(
+                            factory = object : ViewModelProvider.Factory {
+                                @Suppress("UNCHECKED_CAST")
+                                override fun <T : ViewModel> create(modelClass: Class<T>): T {
+                                    return DetailViewModel(sm, itemId) as T
+                                }
+                            }
+                        )
                         DetailScreen(
-                            itemId = itemId,
+                            viewModel = vm,
                             onBack = { navController.popBackStack() },
                         )
                     }
 
-                    // 新建事项页（占位，步骤 5 实现）
+                    // ── 新建事项页 ──
                     composable("create") {
+                        val vm: CreateViewModel = viewModel(
+                            factory = object : ViewModelProvider.Factory {
+                                @Suppress("UNCHECKED_CAST")
+                                override fun <T : ViewModel> create(modelClass: Class<T>): T {
+                                    return CreateViewModel(sm) as T
+                                }
+                            }
+                        )
                         CreateScreen(
+                            viewModel = vm,
                             onBack = { navController.popBackStack() },
                         )
                     }
 
-                    // 设置页（占位，步骤 5 实现）
+                    // ── 设置页 ──
                     composable("settings") {
+                        val vm: SettingsViewModel = viewModel(
+                            factory = object : ViewModelProvider.Factory {
+                                @Suppress("UNCHECKED_CAST")
+                                override fun <T : ViewModel> create(modelClass: Class<T>): T {
+                                    return SettingsViewModel(ss) as T
+                                }
+                            }
+                        )
                         SettingsScreen(
+                            viewModel = vm,
                             onBack = { navController.popBackStack() },
                         )
                     }

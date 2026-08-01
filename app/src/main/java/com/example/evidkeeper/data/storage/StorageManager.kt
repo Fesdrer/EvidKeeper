@@ -246,7 +246,7 @@ class StorageManager(
             compareByDescending<Item> { it.meta.important }
                 .thenByDescending { it.meta.year }
                 .thenByDescending { it.meta.month }
-                .thenBy { it.meta.id },
+                .thenByDescending { it.meta.id },
         )
     }
 
@@ -512,7 +512,7 @@ class StorageManager(
 
     companion object {
         private const val TAG = "StorageManager"
-        private const val META_FILE_NAME = ".meta.json"
+        private const val META_FILE_NAME = "meta.json"
         private const val REMOVE_DIR = "remove"
     }
 }
