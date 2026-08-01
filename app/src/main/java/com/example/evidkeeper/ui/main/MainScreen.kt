@@ -39,7 +39,8 @@ fun MainScreen(
     onOpenCreate: () -> Unit,
     onOpenSettings: () -> Unit,
 ) {
-    val items by viewModel.items.collectAsState()
+    val filteredItems by viewModel.filteredItems.collectAsState()
+    val query by viewModel.query.collectAsState()
 
     // 回到页面时刷新列表
     val lifecycleOwner = LocalLifecycleOwner.current
@@ -59,9 +60,6 @@ fun MainScreen(
     var renameText by remember { mutableStateOf("") }
     var renameError by remember { mutableStateOf<String?>(null) }
 
-    // ── 搜索文本（UI 可用但不影响列表——步骤 6 才接入过滤） ──
-    var searchQuery by remember { mutableStateOf("") }
-
     // ── 长按菜单 ──
     var menuExpanded by remember { mutableStateOf(false) }
     var menuTargetItem by remember { mutableStateOf<Item?>(null) }
@@ -77,14 +75,14 @@ fun MainScreen(
                 verticalAlignment = Alignment.CenterVertically,
             ) {
                 OutlinedTextField(
-                    value = searchQuery,
-                    onValueChange = { searchQuery = it },
+                    value = query,
+                    onValueChange = { viewModel.onQueryChange(it) },
                     modifier = Modifier.weight(1f),
                     placeholder = { Text("搜索事项") },
                     leadingIcon = { Icon(Icons.Default.Search, contentDescription = "搜索") },
                     trailingIcon = {
-                        if (searchQuery.isNotEmpty()) {
-                            IconButton(onClick = { searchQuery = "" }) {
+                        if (query.isNotEmpty()) {
+                            IconButton(onClick = { viewModel.onQueryChange("") }) {
                                 Icon(Icons.Default.Clear, contentDescription = "清除")
                             }
                         }
@@ -101,7 +99,7 @@ fun MainScreen(
             }
         }
     ) { padding ->
-        if (items.isEmpty()) {
+        if (filteredItems.isEmpty()) {
             // 空态
             Box(
                 modifier = Modifier
@@ -121,7 +119,7 @@ fun MainScreen(
                     .padding(padding),
                 contentPadding = PaddingValues(vertical = 4.dp),
             ) {
-                items(items, key = { it.meta.id }) { item ->
+                items(filteredItems, key = { it.meta.id }) { item ->
                     ItemRow(
                         item = item,
                         onLongClick = {
