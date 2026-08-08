@@ -8,6 +8,7 @@ import android.net.Uri
 import android.os.ParcelFileDescriptor
 import android.util.Base64
 import android.util.Log
+import com.example.evidkeeper.data.settings.SettingsStore
 import com.example.evidkeeper.util.FileType
 import com.example.evidkeeper.util.classifyFile
 import kotlinx.coroutines.Dispatchers
@@ -43,37 +44,31 @@ object GlmApiClient {
         .connectTimeout(15, TimeUnit.SECONDS)
         .build()
 
-    // ── 提示词 ──
-
-    private val NAME_PROMPT = """
-你是一个证据文件归档助手。根据文件内容，生成一个简洁的事项名称用于归类。
-规则：
-- 2-6 个中文字符
-- 概括文件的核心内容（如录取通知书→录取通知书，租房合同→房屋租赁，工资单→工资流水）
-- 禁止返回"扫描件""PDF文件""图片""文档"等只描述格式的名称
-- 如果内容不足以判断，根据文件名推断最合理的分类
-- 只回复名称，不要解释、标点或任何附加文字
-""".trimIndent()
-
     // ═══════════════════════════════════════════════════════════
 
     class GenerateError(message: String, val isFatal: Boolean = false) : Exception(message)
 
+    /**
+     * 生成事项名称。
+     * @param prompt 自定义提示词，空/未传时使用默认（SettingsStore.DEFAULT_NAME_PROMPT）
+     */
     suspend fun generateName(
         context: Context,
         fileUri: Uri,
         apiKey: String,
         model: String,
+        prompt: String = SettingsStore.DEFAULT_NAME_PROMPT,
     ): Result<String> = withContext(Dispatchers.IO) {
         try {
+            val effectivePrompt = prompt.ifBlank { SettingsStore.DEFAULT_NAME_PROMPT }
             val (fileName, mimeType) = getFileInfo(context, fileUri)
             val fileType = classifyFile(fileName, mimeType)
             Log.d(TAG, "generateName: $fileName type=$fileType model=$model")
 
             val name = when (fileType) {
-                FileType.IMAGE -> generateFromImage(context, fileUri, apiKey, model)
-                FileType.PDF -> generateFromPdf(context, fileUri, apiKey, model)
-                FileType.TXT -> generateFromTxt(context, fileUri, apiKey, model)
+                FileType.IMAGE -> generateFromImage(context, fileUri, apiKey, model, effectivePrompt)
+                FileType.PDF -> generateFromPdf(context, fileUri, apiKey, model, effectivePrompt)
+                FileType.TXT -> generateFromTxt(context, fileUri, apiKey, model, effectivePrompt)
                 FileType.OTHER -> throw GenerateError("暂不支持该文件类型，支持：图片、PDF、TXT")
             }
             Result.success(cleanName(name))
@@ -90,7 +85,7 @@ object GlmApiClient {
     // ═══════════════════════════════════════════════════════════
 
     private suspend fun generateFromImage(
-        context: Context, uri: Uri, apiKey: String, model: String,
+        context: Context, uri: Uri, apiKey: String, model: String, prompt: String,
     ): String {
         var bytes = context.contentResolver.openInputStream(uri)?.use { it.readBytes() }
             ?: throw GenerateError("无法读取图片文件")
@@ -113,7 +108,7 @@ object GlmApiClient {
         val dataUrl = "data:$mime;base64,$b64"
 
         val body = chatBody(model, listOf(
-            systemMsg(NAME_PROMPT),
+            systemMsg(prompt),
             userMsgVision("请为这张图片的内容生成事项名称。", dataUrl),
         ))
 
@@ -125,7 +120,7 @@ object GlmApiClient {
     // ═══════════════════════════════════════════════════════════
 
     private suspend fun generateFromPdf(
-        context: Context, uri: Uri, apiKey: String, model: String,
+        context: Context, uri: Uri, apiKey: String, model: String, prompt: String,
     ): String {
         val (fileName, mimeType) = getFileInfo(context, uri)
         val fileBytes = context.contentResolver.openInputStream(uri)?.use { it.readBytes() }
@@ -139,13 +134,13 @@ object GlmApiClient {
         // 提取文本太短（图片型 PDF/扫描件）→ 渲染首页为图片走 vision
         if (content.length < 50) {
             Log.d(TAG, "PDF text too short, fallback to vision")
-            return generateFromPdfViaVision(context, uri, apiKey, model)
+            return generateFromPdfViaVision(context, uri, apiKey, model, prompt)
         }
 
         val text = if (content.length > MAX_TEXT_LEN) content.take(MAX_TEXT_LEN) else content
 
         val body = chatBody(model, listOf(
-            systemMsg(NAME_PROMPT),
+            systemMsg(prompt),
             userMsg("文件内容：\n$text"),
         ))
 
@@ -154,7 +149,7 @@ object GlmApiClient {
 
     /** PDF 文本提取不足时：用 PdfRenderer 渲染首页为图片，走 vision */
     private suspend fun generateFromPdfViaVision(
-        context: Context, uri: Uri, apiKey: String, model: String,
+        context: Context, uri: Uri, apiKey: String, model: String, prompt: String,
     ): String {
         var pfd: ParcelFileDescriptor? = null
         var renderer: PdfRenderer? = null
@@ -183,7 +178,7 @@ object GlmApiClient {
             val dataUrl = "data:image/jpeg;base64,$b64"
 
             val body = chatBody(model, listOf(
-                systemMsg(NAME_PROMPT),
+                systemMsg(prompt),
                 userMsgVision("请为这份 PDF 文件的内容生成事项名称。", dataUrl),
             ))
 
@@ -199,7 +194,7 @@ object GlmApiClient {
     // ═══════════════════════════════════════════════════════════
 
     private suspend fun generateFromTxt(
-        context: Context, uri: Uri, apiKey: String, model: String,
+        context: Context, uri: Uri, apiKey: String, model: String, prompt: String,
     ): String {
         val text = context.contentResolver.openInputStream(uri)?.use {
             it.bufferedReader().readText()
@@ -209,7 +204,7 @@ object GlmApiClient {
         val truncated = if (text.length > MAX_TEXT_LEN) text.take(MAX_TEXT_LEN) else text
 
         val body = chatBody(model, listOf(
-            systemMsg(NAME_PROMPT),
+            systemMsg(prompt),
             userMsg("文件内容：\n$truncated"),
         ))
 

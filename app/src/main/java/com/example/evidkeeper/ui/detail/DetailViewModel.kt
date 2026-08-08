@@ -2,12 +2,15 @@ package com.example.evidkeeper.ui.detail
 
 import android.net.Uri
 import androidx.lifecycle.ViewModel
-import com.example.evidkeeper.data.model.AddFileResult
+import androidx.lifecycle.viewModelScope
 import com.example.evidkeeper.data.model.Item
 import com.example.evidkeeper.data.storage.StorageManager
+import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
+import kotlinx.coroutines.launch
+import kotlinx.coroutines.withContext
 
 class DetailViewModel(
     private val storageManager: StorageManager,
@@ -20,6 +23,10 @@ class DetailViewModel(
     // 文件操作结果提示
     private val _toastMessage = MutableStateFlow<String?>(null)
     val toastMessage: StateFlow<String?> = _toastMessage.asStateFlow()
+
+    // 批量添加文件进行中
+    private val _isAdding = MutableStateFlow(false)
+    val isAdding: StateFlow<Boolean> = _isAdding.asStateFlow()
 
     init { load() }
 
@@ -51,17 +58,41 @@ class DetailViewModel(
         load()
     }
 
-    // ── 添加文件 ──
-    fun addFile(uri: Uri): AddFileResult {
-        val it = _item.value ?: return AddFileResult(false, errorMessage = "事项不存在")
-        val result = storageManager.addFile(it, uri)
-        if (result.success) {
-            load()
-            if (result.needPromptDeleteSource) {
-                _toastMessage.value = "已复制，但无法删除原文件，请手动清理"
+    // ── 添加文件（支持多选批量） ──
+    fun addFiles(uris: List<Uri>) {
+        val it = _item.value
+        if (it == null) {
+            _toastMessage.value = "事项不存在"
+            return
+        }
+        if (uris.isEmpty() || _isAdding.value) return
+
+        _isAdding.value = true
+        viewModelScope.launch {
+            var success = 0
+            var failed = 0
+            var needCleanup = false
+            // 后台逐文件复制，避免大文件阻塞主线程
+            withContext(Dispatchers.IO) {
+                uris.forEach { uri ->
+                    val r = storageManager.addFile(it, uri)
+                    if (r.success) {
+                        success++
+                        if (r.needPromptDeleteSource) needCleanup = true
+                    } else {
+                        failed++
+                    }
+                }
+            }
+            load() // 只刷新一次，避免 N 次全目录扫描
+            _isAdding.value = false
+            _toastMessage.value = when {
+                failed == 0 && !needCleanup -> "已添加 $success 个文件"
+                failed == 0 -> "已添加 $success 个文件，但部分原文件无法删除，请手动清理"
+                success == 0 -> "添加失败：$failed 个文件未能复制"
+                else -> "已添加 $success 个，$failed 个失败"
             }
         }
-        return result
     }
 
     // ── 删除文件 ──

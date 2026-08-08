@@ -6,6 +6,8 @@ import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.*
+import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.filled.Visibility
@@ -19,6 +21,9 @@ import androidx.compose.ui.text.input.PasswordVisualTransformation
 import androidx.compose.ui.text.input.VisualTransformation
 import androidx.compose.ui.unit.dp
 
+// AI 提示词最大长度（防止误粘贴超长文本）
+private const val MAX_PROMPT_LEN = 2000
+
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun SettingsScreen(
@@ -28,6 +33,7 @@ fun SettingsScreen(
     val rootUri by viewModel.rootUri.collectAsState()
     val apiKey by viewModel.apiKey.collectAsState()
     val model by viewModel.model.collectAsState()
+    val aiPrompt by viewModel.aiPrompt.collectAsState()
     val context = LocalContext.current
 
     var apiKeyVisible by remember { mutableStateOf(false) }
@@ -67,7 +73,8 @@ fun SettingsScreen(
             modifier = Modifier
                 .fillMaxSize()
                 .padding(padding)
-                .padding(horizontal = 16.dp, vertical = 8.dp),
+                .padding(horizontal = 16.dp, vertical = 8.dp)
+                .verticalScroll(rememberScrollState()),
             verticalArrangement = Arrangement.spacedBy(16.dp),
         ) {
             // ── 存储文件夹 ──
@@ -139,7 +146,25 @@ fun SettingsScreen(
                 }
             }
 
-            Spacer(modifier = Modifier.weight(1f))
+            Divider()
+
+            // ── AI 识别提示词 ──
+            Text("AI 识别提示词", style = MaterialTheme.typography.labelLarge)
+            OutlinedTextField(
+                value = aiPrompt,
+                onValueChange = { viewModel.setAiPrompt(it.take(MAX_PROMPT_LEN)) },
+                modifier = Modifier.fillMaxWidth(),
+                label = { Text("提示词") },
+                minLines = 5,
+                maxLines = 10,
+                supportingText = { Text("${aiPrompt.length}/$MAX_PROMPT_LEN，留空时使用默认提示词") },
+            )
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.End,
+            ) {
+                TextButton(onClick = { viewModel.resetAiPrompt() }) { Text("恢复默认") }
+            }
 
             // ── 保存按钮 ──
             Button(

@@ -12,8 +12,8 @@ android {
         applicationId = "com.example.evidkeeper"
         minSdk = 26
         targetSdk = 35
-        versionCode = 1
-        versionName = "1.0"
+        versionCode = 2
+        versionName = "1.1"
 
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
         vectorDrawables {
@@ -31,11 +31,15 @@ android {
         }
     }
 
-    // 自定义 APK 输出文件名 → EvidKeeper-v1.0-release.apk
+    // 自定义 APK 输出文件名 → release: EvidKeeper-v1.1.apk；debug 保留 -debug 区分，避免同名覆盖
     applicationVariants.all {
         outputs.all {
             (this as? com.android.build.gradle.internal.api.ApkVariantOutputImpl)?.let {
-                it.outputFileName = "EvidKeeper-v${defaultConfig.versionName}-$name.apk"
+                it.outputFileName = if (name == "release") {
+                    "EvidKeeper-v${defaultConfig.versionName}.apk"
+                } else {
+                    "EvidKeeper-v${defaultConfig.versionName}-$name.apk"
+                }
             }
         }
     }

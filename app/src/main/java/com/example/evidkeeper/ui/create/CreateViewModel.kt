@@ -63,10 +63,11 @@ class CreateViewModel(
             return
         }
         val model = settingsStore.getModel()
+        val prompt = settingsStore.getAiPrompt() // 空/未设置 → 内部回退默认
 
         _isGenerating.value = true
         viewModelScope.launch {
-            val result = GlmApiClient.generateName(context, uri, apiKey, model)
+            val result = GlmApiClient.generateName(context, uri, apiKey, model, prompt)
             result.onSuccess { generated ->
                 _name.value = generated
                 _isGenerating.value = false

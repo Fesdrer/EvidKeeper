@@ -47,6 +47,7 @@ fun DetailScreen(
     val item by viewModel.item.collectAsState()
     val context = LocalContext.current
     val toastMsg by viewModel.toastMessage.collectAsState()
+    val isAdding by viewModel.isAdding.collectAsState()
 
     // Toast 提示
     LaunchedEffect(toastMsg) {
@@ -68,11 +69,11 @@ fun DetailScreen(
     var fileMenuExpanded by remember { mutableStateOf(false) }
     var fileMenuTarget by remember { mutableStateOf<String?>(null) }
 
-    // 选择文件
+    // 选择文件（支持多选）
     val filePickerLauncher = rememberLauncherForActivityResult(
-        ActivityResultContracts.OpenDocument()
-    ) { uri ->
-        if (uri != null) viewModel.addFile(uri)
+        ActivityResultContracts.OpenMultipleDocuments()
+    ) { uris ->
+        if (!uris.isNullOrEmpty()) viewModel.addFiles(uris.toList())
     }
 
     Scaffold(
@@ -131,10 +132,19 @@ fun DetailScreen(
                 modifier = Modifier.fillMaxWidth().padding(16.dp),
                 contentAlignment = Alignment.Center,
             ) {
-                FilledTonalButton(onClick = { filePickerLauncher.launch(arrayOf("*/*")) }) {
-                    Icon(Icons.Default.Add, contentDescription = "添加文件")
-                    Spacer(modifier = Modifier.width(4.dp))
-                    Text("添加文件")
+                FilledTonalButton(
+                    onClick = { filePickerLauncher.launch(arrayOf("*/*")) },
+                    enabled = !isAdding,
+                ) {
+                    if (isAdding) {
+                        CircularProgressIndicator(modifier = Modifier.size(20.dp), strokeWidth = 2.dp)
+                        Spacer(modifier = Modifier.width(8.dp))
+                        Text("添加中…")
+                    } else {
+                        Icon(Icons.Default.Add, contentDescription = "添加文件")
+                        Spacer(modifier = Modifier.width(4.dp))
+                        Text("添加文件")
+                    }
                 }
             }
         },
