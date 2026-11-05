@@ -28,6 +28,7 @@ fun CreateScreen(
     val selectedFileUri by viewModel.selectedFileUri.collectAsState()
     val done by viewModel.done.collectAsState()
     val isGenerating by viewModel.isGenerating.collectAsState()
+    val isCreating by viewModel.isCreating.collectAsState()
     val aiError by viewModel.aiError.collectAsState()
     val context = LocalContext.current
 
@@ -150,12 +151,22 @@ fun CreateScreen(
             // ── 创建按钮 ──
             Button(
                 onClick = {
-                    val err = viewModel.create()
-                    errorMsg = err
+                    viewModel.create { err -> errorMsg = err }
                 },
                 modifier = Modifier.fillMaxWidth(),
+                enabled = !isCreating,
             ) {
-                Text("创建")
+                if (isCreating) {
+                    CircularProgressIndicator(
+                        modifier = Modifier.size(16.dp),
+                        strokeWidth = 2.dp,
+                        color = MaterialTheme.colorScheme.onPrimary,
+                    )
+                    Spacer(modifier = Modifier.width(8.dp))
+                    Text("创建中…")
+                } else {
+                    Text("创建")
+                }
             }
 
             Spacer(modifier = Modifier.height(16.dp))

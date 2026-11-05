@@ -20,6 +20,7 @@ import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import kotlinx.coroutines.delay
+import kotlinx.coroutines.flow.distinctUntilChanged
 import kotlinx.coroutines.launch
 import kotlin.math.abs
 
@@ -61,7 +62,7 @@ fun YearMonthPickerDialog(
                 // 年份选择器
                 ScrollPicker(
                     range = 2000..2099,
-                    selected = selectedYear,
+                    initialSelected = initialYear,
                     onSelected = { selectedYear = it },
                     modifier = Modifier.weight(1f),
                 )
@@ -69,7 +70,7 @@ fun YearMonthPickerDialog(
                 // 月份选择器
                 ScrollPicker(
                     range = 1..12,
-                    selected = selectedMonth,
+                    initialSelected = initialMonth,
                     onSelected = { selectedMonth = it },
                     modifier = Modifier.weight(1f),
                 )
@@ -96,7 +97,7 @@ fun YearMonthPickerDialog(
 @Composable
 fun ScrollPicker(
     range: IntRange,
-    selected: Int,
+    initialSelected: Int,
     onSelected: (Int) -> Unit,
     modifier: Modifier = Modifier,
     itemHeight: Dp = 44.dp,
@@ -105,6 +106,9 @@ fun ScrollPicker(
     val baseItems = remember(range) { range.toList() }
     val baseSize = baseItems.size
 
+    // 空 range 直接不渲染：否则 centerItemIndex % baseSize 会除零崩溃
+    if (baseSize == 0) return
+
     // 3 份数据实现无限滑动
     val items = remember(range) {
         buildList { repeat(3) { addAll(range.toList()) } }
@@ -112,8 +116,10 @@ fun ScrollPicker(
     val totalSize = items.size
     val coroutineScope = rememberCoroutineScope()
 
-    // 初始定位到第 2 份副本中选中项的位置
-    val startIndex = baseSize + baseItems.indexOf(selected).coerceAtLeast(0) - visibleItems / 2
+    // 初始定位到第 2 份副本中选中项的位置（仅首次定位用，后续不随重组重算）
+    val startIndex = remember(range, initialSelected) {
+        baseSize + baseItems.indexOf(initialSelected).coerceAtLeast(0) - visibleItems / 2
+    }
     val listState = rememberLazyListState(
         initialFirstVisibleItemIndex = startIndex.coerceAtLeast(0),
     )
@@ -129,9 +135,13 @@ fun ScrollPicker(
         }
     }
 
-    // 选中值取模归一化
-    LaunchedEffect(centerItemIndex) {
-        onSelected(baseItems[centerItemIndex % baseSize])
+    // 选中值取模归一化：只在中心项真正变化时回调一次（重复值不重复回调）
+    LaunchedEffect(Unit) {
+        snapshotFlow { centerItemIndex }
+            .distinctUntilChanged()
+            .collect { index ->
+                onSelected(baseItems[index % baseSize])
+            }
     }
 
     // 松手吸附（必须用 snapshotFlow，不能用 LaunchedEffect(isScrollInProgress) 当 key）

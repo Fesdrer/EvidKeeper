@@ -45,6 +45,7 @@ fun DetailScreen(
     onBack: () -> Unit,
 ) {
     val item by viewModel.item.collectAsState()
+    val loading by viewModel.loading.collectAsState()
     val context = LocalContext.current
     val toastMsg by viewModel.toastMessage.collectAsState()
     val isAdding by viewModel.isAdding.collectAsState()
@@ -64,6 +65,8 @@ fun DetailScreen(
     var showDeleteFileDialog by remember { mutableStateOf<String?>(null) }
     var renameText by remember { mutableStateOf("") }
     var renameError by remember { mutableStateOf<String?>(null) }
+    // 改名进行中，防止重复点击
+    var busy by remember { mutableStateOf(false) }
 
     // 长按文件菜单
     var fileMenuExpanded by remember { mutableStateOf(false) }
@@ -149,15 +152,33 @@ fun DetailScreen(
             }
         },
     ) { padding ->
-        item?.let { itm ->
-            if (itm.files.isEmpty()) {
+        val itm = item
+        when {
+            itm == null && loading -> {
+                Box(
+                    modifier = Modifier.fillMaxSize().padding(padding),
+                    contentAlignment = Alignment.Center,
+                ) {
+                    CircularProgressIndicator()
+                }
+            }
+            itm == null -> {
+                Box(
+                    modifier = Modifier.fillMaxSize().padding(padding),
+                    contentAlignment = Alignment.Center,
+                ) {
+                    Text("事项不存在", color = MaterialTheme.colorScheme.onSurfaceVariant)
+                }
+            }
+            itm.files.isEmpty() -> {
                 Box(
                     modifier = Modifier.fillMaxSize().padding(padding),
                     contentAlignment = Alignment.Center,
                 ) {
                     Text("暂无文件，点击下方 + 添加", color = MaterialTheme.colorScheme.onSurfaceVariant)
                 }
-            } else {
+            }
+            else -> {
                 LazyVerticalGrid(
                     columns = GridCells.Fixed(3),
                     modifier = Modifier.fillMaxSize().padding(padding),
@@ -175,10 +196,10 @@ fun DetailScreen(
                             },
                         )
 
-                        // 长按菜单
-                        Box {
+                        // 长按菜单：只在命中的那一项才创建，不再每格常驻一个 Popup
+                        if (fileMenuExpanded && fileMenuTarget == file.name) {
                             DropdownMenu(
-                                expanded = fileMenuExpanded && fileMenuTarget == file.name,
+                                expanded = true,
                                 onDismissRequest = {
                                     fileMenuExpanded = false
                                     fileMenuTarget = null
@@ -229,13 +250,20 @@ fun DetailScreen(
                 )
             },
             confirmButton = {
-                TextButton(onClick = {
-                    val t = renameText.trim()
-                    if (t.isEmpty()) { renameError = "名称不能为空"; return@TextButton }
-                    if (t.any { it in illegalChars }) { renameError = "名称不能包含这些字符：\\ / : * ? \" < > |"; return@TextButton }
-                    if (viewModel.renameItem(t)) { showRenameDialog = false; renameError = null }
-                    else { renameError = "文件夹名冲突，请换一个名称" }
-                }) { Text("确定") }
+                TextButton(
+                    enabled = !busy,
+                    onClick = {
+                        val t = renameText.trim()
+                        if (t.isEmpty()) { renameError = "名称不能为空"; return@TextButton }
+                        if (t.any { it in illegalChars }) { renameError = "名称不能包含这些字符：\\ / : * ? \" < > |"; return@TextButton }
+                        busy = true
+                        viewModel.renameItem(t) { ok ->
+                            busy = false
+                            if (ok) { showRenameDialog = false; renameError = null }
+                            else { renameError = "文件夹名冲突，请换一个名称" }
+                        }
+                    },
+                ) { Text("确定") }
             },
             dismissButton = { TextButton(onClick = { showRenameDialog = false; renameError = null }) { Text("取消") } },
         )
@@ -275,13 +303,20 @@ fun DetailScreen(
                 }
             },
             confirmButton = {
-                TextButton(onClick = {
-                    val t = renameText.trim()
-                    if (t.isEmpty()) { renameError = "文件名不能为空"; return@TextButton }
-                    if (t.any { it in illegalChars }) { renameError = "名称不能包含这些字符：\\ / : * ? \" < > |"; return@TextButton }
-                    if (viewModel.renameFile(oldName, t)) { showRenameFileDialog = null; renameError = null }
-                    else { renameError = "改名失败，请检查文件名是否冲突" }
-                }) { Text("确定") }
+                TextButton(
+                    enabled = !busy,
+                    onClick = {
+                        val t = renameText.trim()
+                        if (t.isEmpty()) { renameError = "文件名不能为空"; return@TextButton }
+                        if (t.any { it in illegalChars }) { renameError = "名称不能包含这些字符：\\ / : * ? \" < > |"; return@TextButton }
+                        busy = true
+                        viewModel.renameFile(oldName, t) { ok ->
+                            busy = false
+                            if (ok) { showRenameFileDialog = null; renameError = null }
+                            else { renameError = "改名失败，请检查文件名是否冲突" }
+                        }
+                    },
+                ) { Text("确定") }
             },
             dismissButton = { TextButton(onClick = { showRenameFileDialog = null; renameError = null }) { Text("取消") } },
         )
@@ -295,8 +330,8 @@ fun DetailScreen(
             text = { Text("确定删除文件「$fileName」？文件将移入回收站") },
             confirmButton = {
                 TextButton(onClick = {
-                    viewModel.deleteFile(fileName)
                     showDeleteFileDialog = null
+                    viewModel.deleteFile(fileName)
                 }) { Text("确定删除", color = MaterialTheme.colorScheme.error) }
             },
             dismissButton = { TextButton(onClick = { showDeleteFileDialog = null }) { Text("取消") } },
@@ -317,6 +352,17 @@ private fun FileGridItem(
 ) {
     val fileName = file.name ?: "未知"
     val fileType = classifyFile(fileName)
+    val context = LocalContext.current
+
+    // 只在 uri 或文件名变化时才重建 ImageRequest。
+    // 原来每次重组都 new 一个请求，滚动/任意状态变化都会让 Coil 重新排队解码。
+    val imageRequest = remember(file.uri, fileName) {
+        ImageRequest.Builder(context)
+            .data(file.uri)
+            .crossfade(120)
+            .size(TRUMBNAIL_PX)   // 缩略图固定解码尺寸，别把原图整张解码进内存
+            .build()
+    }
 
     Column(
         modifier = Modifier
@@ -335,10 +381,7 @@ private fun FileGridItem(
             when (fileType) {
                 FileType.IMAGE -> {
                     AsyncImage(
-                        model = ImageRequest.Builder(LocalContext.current)
-                            .data(file.uri)
-                            .crossfade(true)
-                            .build(),
+                        model = imageRequest,
                         contentDescription = fileName,
                         modifier = Modifier.fillMaxSize(),
                         contentScale = ContentScale.Crop,
@@ -412,6 +455,9 @@ private fun FileGridItem(
         )
     }
 }
+
+/** 缩略图解码尺寸（px）：72dp 在 xxxhdpi(4x) 下约 288px，留一点余量 */
+private const val TRUMBNAIL_PX = 320
 
 // ═══════════════════════════════════════════════════════════
 // 系统查看器打开文件

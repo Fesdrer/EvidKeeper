@@ -9,20 +9,26 @@ import androidx.security.crypto.MasterKey
 /**
  * 持久化存储：SAF 目录 Uri、智谱 API Key、AI 模型名。
  * 使用 EncryptedSharedPreferences 加密存储 API Key。
+ *
+ * 性能约法：EncryptedSharedPreferences.create 会走 Android Keystore 生成/取密钥 +
+ * AES 初始化，实测在冷启动主线程上要数百毫秒。因此改成 lazy：
+ * 构造零成本，第一次真正读写时才建，那时调用方已经在线程池里。
  */
-class SettingsStore(context: Context) {
+class SettingsStore(private val context: Context) {
 
-    private val masterKey = MasterKey.Builder(context)
-        .setKeyScheme(MasterKey.KeyScheme.AES256_GCM)
-        .build()
+    private val prefs: SharedPreferences by lazy {
+        val masterKey = MasterKey.Builder(context)
+            .setKeyScheme(MasterKey.KeyScheme.AES256_GCM)
+            .build()
 
-    private val prefs: SharedPreferences = EncryptedSharedPreferences.create(
-        context,
-        PREFS_NAME,
-        masterKey,
-        EncryptedSharedPreferences.PrefKeyEncryptionScheme.AES256_SIV,
-        EncryptedSharedPreferences.PrefValueEncryptionScheme.AES256_GCM,
-    )
+        EncryptedSharedPreferences.create(
+            context,
+            PREFS_NAME,
+            masterKey,
+            EncryptedSharedPreferences.PrefKeyEncryptionScheme.AES256_SIV,
+            EncryptedSharedPreferences.PrefValueEncryptionScheme.AES256_GCM,
+        )
+    }
 
     // ── 存储目录 Uri ──
 

@@ -5,12 +5,10 @@ import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import com.example.evidkeeper.data.model.Item
 import com.example.evidkeeper.data.storage.StorageManager
-import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.launch
-import kotlinx.coroutines.withContext
 
 class DetailViewModel(
     private val storageManager: StorageManager,
@@ -19,6 +17,10 @@ class DetailViewModel(
 
     private val _item = MutableStateFlow<Item?>(null)
     val item: StateFlow<Item?> = _item.asStateFlow()
+
+    /** 首次加载中（区分"事项不存在"和"还没读完"） */
+    private val _loading = MutableStateFlow(true)
+    val loading: StateFlow<Boolean> = _loading.asStateFlow()
 
     // 文件操作结果提示
     private val _toastMessage = MutableStateFlow<String?>(null)
@@ -30,8 +32,15 @@ class DetailViewModel(
 
     init { load() }
 
-    fun load() {
-        _item.value = storageManager.listItems().find { it.meta.id == itemId }
+    /**
+     * 刷新当前事项。
+     * 走 StorageManager 的共享缓存，进详情页不再全量重扫所有事项的 meta。
+     */
+    fun load(forceRescan: Boolean = false) {
+        viewModelScope.launch {
+            _item.value = storageManager.listItems(forceRescan).find { it.meta.id == itemId }
+            _loading.value = false
+        }
     }
 
     fun clearToast() { _toastMessage.value = null }
@@ -39,23 +48,29 @@ class DetailViewModel(
     // ── 星标切换 ──
     fun toggleImportant() {
         val it = _item.value ?: return
-        storageManager.toggleImportant(it)
-        load()
+        viewModelScope.launch {
+            storageManager.toggleImportant(it)
+            load()
+        }
     }
 
     // ── 改名 ──
-    fun renameItem(newName: String): Boolean {
-        val it = _item.value ?: return false
-        val ok = storageManager.renameItem(it, newName)
-        if (ok) load()
-        return ok
+    fun renameItem(newName: String, onResult: (Boolean) -> Unit) {
+        val it = _item.value ?: return onResult(false)
+        viewModelScope.launch {
+            val ok = storageManager.renameItem(it, newName)
+            if (ok) load()
+            onResult(ok)
+        }
     }
 
     // ── 改时间 ──
     fun changeTime(year: Int, month: Int) {
         val it = _item.value ?: return
-        storageManager.changeTime(it, year, month)
-        load()
+        viewModelScope.launch {
+            storageManager.changeTime(it, year, month)
+            load()
+        }
     }
 
     // ── 添加文件（支持多选批量） ──
@@ -72,19 +87,17 @@ class DetailViewModel(
             var success = 0
             var failed = 0
             var needCleanup = false
-            // 后台逐文件复制，避免大文件阻塞主线程
-            withContext(Dispatchers.IO) {
-                uris.forEach { uri ->
-                    val r = storageManager.addFile(it, uri)
-                    if (r.success) {
-                        success++
-                        if (r.needPromptDeleteSource) needCleanup = true
-                    } else {
-                        failed++
-                    }
+            // 逐文件复制。StorageManager 内部已切 Dispatchers.IO，不会再阻塞主线程。
+            uris.forEach { uri ->
+                val r = storageManager.addFile(it, uri)
+                if (r.success) {
+                    success++
+                    if (r.needPromptDeleteSource) needCleanup = true
+                } else {
+                    failed++
                 }
             }
-            load() // 只刷新一次，避免 N 次全目录扫描
+            load(forceRescan = true) // 只刷新一次，避免 N 次全目录扫描
             _isAdding.value = false
             _toastMessage.value = when {
                 failed == 0 && !needCleanup -> "已添加 $success 个文件"
@@ -96,20 +109,24 @@ class DetailViewModel(
     }
 
     // ── 删除文件 ──
-    fun deleteFile(fileName: String): Boolean {
-        val it = _item.value ?: return false
-        val file = it.files.find { f -> f.name == fileName } ?: return false
-        val ok = storageManager.deleteFile(it, file)
-        if (ok) load()
-        return ok
+    fun deleteFile(fileName: String, onResult: (Boolean) -> Unit = {}) {
+        val it = _item.value ?: return
+        val file = it.files.find { f -> f.name == fileName } ?: return
+        viewModelScope.launch {
+            val ok = storageManager.deleteFile(it, file)
+            if (ok) load()
+            onResult(ok)
+        }
     }
 
     // ── 文件改名 ──
-    fun renameFile(oldName: String, newMainName: String): Boolean {
-        val it = _item.value ?: return false
-        val file = it.files.find { f -> f.name == oldName } ?: return false
-        val ok = storageManager.renameFile(it, file, newMainName)
-        if (ok) load()
-        return ok
+    fun renameFile(oldName: String, newMainName: String, onResult: (Boolean) -> Unit) {
+        val it = _item.value ?: return onResult(false)
+        val file = it.files.find { f -> f.name == oldName } ?: return onResult(false)
+        viewModelScope.launch {
+            val ok = storageManager.renameFile(it, file, newMainName)
+            if (ok) load()
+            onResult(ok)
+        }
     }
 }

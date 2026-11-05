@@ -7,10 +7,12 @@ import androidx.lifecycle.viewModelScope
 import com.example.evidkeeper.data.settings.SettingsStore
 import com.example.evidkeeper.data.storage.StorageManager
 import com.example.evidkeeper.network.GlmApiClient
+import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.withContext
 import java.util.Calendar
 
 class CreateViewModel(
@@ -35,6 +37,9 @@ class CreateViewModel(
     private val _done = MutableStateFlow(false)
     val done: StateFlow<Boolean> = _done.asStateFlow()
 
+    private val _isCreating = MutableStateFlow(false)
+    val isCreating: StateFlow<Boolean> = _isCreating.asStateFlow()
+
     // AI 生成状态
     private val _isGenerating = MutableStateFlow(false)
     val isGenerating: StateFlow<Boolean> = _isGenerating.asStateFlow()
@@ -57,16 +62,20 @@ class CreateViewModel(
             _aiError.value = "请先选择文件"
             return
         }
-        val apiKey = settingsStore.getApiKey()
-        if (apiKey.isNullOrBlank()) {
-            _aiError.value = "请先到设置页配置 API Key"
-            return
-        }
-        val model = settingsStore.getModel()
-        val prompt = settingsStore.getAiPrompt() // 空/未设置 → 内部回退默认
+        if (_isGenerating.value) return
 
         _isGenerating.value = true
         viewModelScope.launch {
+            // 读加密 prefs 也可能触达 Keystore，放 IO 线程
+            val apiKey = withContext(Dispatchers.IO) { settingsStore.getApiKey() }
+            if (apiKey.isNullOrBlank()) {
+                _aiError.value = "请先到设置页配置 API Key"
+                _isGenerating.value = false
+                return@launch
+            }
+            val model = withContext(Dispatchers.IO) { settingsStore.getModel() }
+            val prompt = withContext(Dispatchers.IO) { settingsStore.getAiPrompt() }
+
             val result = GlmApiClient.generateName(context, uri, apiKey, model, prompt)
             result.onSuccess { generated ->
                 _name.value = generated
@@ -78,25 +87,45 @@ class CreateViewModel(
         }
     }
 
-    /** 创建事项，成功则设置 done=true */
-    fun create(): String? {
+    /**
+     * 创建事项。建目录、写 meta、复制文件全部是 SAF 跨进程调用，
+     * 原来跑在点击回调（主线程）里，会卡住整帧；现在整体移到 IO 线程，
+     * 并通过 onResult 回调把结果送回 UI。
+     */
+    fun create(onResult: (String?) -> Unit) {
+        if (_isCreating.value) return
+
         val n = _name.value.trim()
-        if (n.isEmpty()) return "名称不能为空"
-        val illegal = setOf('\\', '/', ':', '*', '?', '"', '<', '>', '|')
-        if (n.any { it in illegal }) return "名称不能包含这些字符：\\ / : * ? \" < > |"
-
-        val item = storageManager.createItem(n, _year.value, _month.value)
-            ?: return "创建失败，请检查存储目录是否已设置"
-
-        _selectedFileUri.value?.let { uri ->
-            val result = storageManager.addFile(item, uri)
-            if (result.needPromptDeleteSource) {
-                _done.value = true
-                return "已创建，但无法删除原文件，请手动清理"
-            }
+        if (n.isEmpty()) {
+            onResult("名称不能为空")
+            return
         }
-        _done.value = true
-        return null
+        val illegal = setOf('\\', '/', ':', '*', '?', '"', '<', '>', '|')
+        if (n.any { it in illegal }) {
+            onResult("名称不能包含这些字符：\\ / : * ? \" < > |")
+            return
+        }
+
+        _isCreating.value = true
+        viewModelScope.launch {
+            val item = storageManager.createItem(n, _year.value, _month.value)
+            if (item == null) {
+                _isCreating.value = false
+                onResult("创建失败，请检查存储目录是否已设置")
+                return@launch
+            }
+
+            var message: String? = null
+            _selectedFileUri.value?.let { uri ->
+                val result = storageManager.addFile(item, uri)
+                if (result.needPromptDeleteSource) {
+                    message = "已创建，但无法删除原文件，请手动清理"
+                }
+            }
+            _isCreating.value = false
+            _done.value = true
+            onResult(message)
+        }
     }
 
     fun resetDone() { _done.value = false }

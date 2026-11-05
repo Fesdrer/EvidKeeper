@@ -169,8 +169,9 @@ fun SettingsScreen(
             // ── 保存按钮 ──
             Button(
                 onClick = {
-                    viewModel.save()
-                    Toast.makeText(context, "已保存", Toast.LENGTH_SHORT).show()
+                    viewModel.save {
+                        Toast.makeText(context, "已保存", Toast.LENGTH_SHORT).show()
+                    }
                 },
                 modifier = Modifier.fillMaxWidth(),
             ) {

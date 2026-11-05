@@ -39,10 +39,7 @@ fun MainScreen(
     onOpenCreate: () -> Unit,
     onOpenSettings: () -> Unit,
 ) {
-    val filteredItems by viewModel.filteredItems.collectAsState()
-    val query by viewModel.query.collectAsState()
-
-    // 回到页面时刷新列表
+    // 回到页面时刷新列表。现在 load() 默认吃缓存，不再每次全量重扫 SAF。
     val lifecycleOwner = LocalLifecycleOwner.current
     DisposableEffect(lifecycleOwner) {
         val observer = LifecycleEventObserver { _, event ->
@@ -66,101 +63,42 @@ fun MainScreen(
 
     Scaffold(
         topBar = {
-            // 顶部栏：搜索框 + + 按钮 + 齿轮按钮（加状态栏间距）
-            Row(
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .statusBarsPadding()
-                    .padding(horizontal = 8.dp, vertical = 4.dp),
-                verticalAlignment = Alignment.CenterVertically,
-            ) {
-                OutlinedTextField(
-                    value = query,
-                    onValueChange = { viewModel.onQueryChange(it) },
-                    modifier = Modifier.weight(1f),
-                    placeholder = { Text("搜索事项") },
-                    leadingIcon = { Icon(Icons.Default.Search, contentDescription = "搜索") },
-                    trailingIcon = {
-                        if (query.isNotEmpty()) {
-                            IconButton(onClick = { viewModel.onQueryChange("") }) {
-                                Icon(Icons.Default.Clear, contentDescription = "清除")
-                            }
-                        }
-                    },
-                    singleLine = true,
-                )
-                Spacer(modifier = Modifier.width(4.dp))
-                IconButton(onClick = onOpenCreate) {
-                    Icon(Icons.Default.Add, contentDescription = "新建事项")
-                }
-                IconButton(onClick = onOpenSettings) {
-                    Icon(Icons.Default.Settings, contentDescription = "设置")
-                }
-            }
+            // 顶部栏拆成独立 composable：搜索框的每次输入只重组它自己，
+            // 不会带着整个列表一起重组。
+            MainTopBar(
+                viewModel = viewModel,
+                onOpenCreate = onOpenCreate,
+                onOpenSettings = onOpenSettings,
+            )
         }
     ) { padding ->
-        if (filteredItems.isEmpty()) {
-            // 空态
-            Box(
-                modifier = Modifier
-                    .fillMaxSize()
-                    .padding(padding),
-                contentAlignment = Alignment.Center,
-            ) {
-                Text(
-                    "还没有事项，点右上角 + 新建",
-                    color = MaterialTheme.colorScheme.onSurfaceVariant,
-                )
-            }
-        } else {
-            LazyColumn(
-                modifier = Modifier
-                    .fillMaxSize()
-                    .padding(padding),
-                contentPadding = PaddingValues(vertical = 4.dp),
-            ) {
-                items(filteredItems, key = { it.meta.id }) { item ->
-                    ItemRow(
-                        item = item,
-                        onLongClick = {
-                            menuTargetItem = item
-                            menuExpanded = true
-                        },
-                        onClick = { onOpenDetail(item.meta.id) },
-                    )
-
-                    // 长按弹出菜单
-                    Box {
-                        DropdownMenu(
-                            expanded = menuExpanded && menuTargetItem == item,
-                            onDismissRequest = {
-                                menuExpanded = false
-                                menuTargetItem = null
-                            },
-                        ) {
-                            DropdownMenuItem(
-                                text = { Text("改名") },
-                                onClick = {
-                                    menuExpanded = false
-                                    menuTargetItem = null
-                                    renameText = item.meta.name
-                                    renameError = null
-                                    showRenameDialog = item
-                                },
-                            )
-                            DropdownMenuItem(
-                                text = { Text("删除", color = MaterialTheme.colorScheme.error) },
-                                onClick = {
-                                    menuExpanded = false
-                                    menuTargetItem = null
-                                    showDeleteDialog = item
-                                },
-                            )
-                        }
-                    }
-                }
-            }
-        }
+        MainContent(
+            viewModel = viewModel,
+            padding = padding,
+            onOpenDetail = onOpenDetail,
+            onLongPressItem = { item ->
+                menuTargetItem = item
+                menuExpanded = true
+            },
+            menuExpanded = menuExpanded,
+            menuTargetItem = menuTargetItem,
+            onMenuDismiss = {
+                menuExpanded = false
+                menuTargetItem = null
+            },
+            onMenuRename = { item ->
+                menuExpanded = false
+                menuTargetItem = null
+                renameText = item.meta.name
+                renameError = null
+                showRenameDialog = item
+            },
+            onMenuDelete = { item ->
+                menuExpanded = false
+                menuTargetItem = null
+                showDeleteDialog = item
+            },
+        )
     }
 
     // ── 改名对话框 ──
@@ -195,12 +133,14 @@ fun MainScreen(
                         renameError = "名称不能包含这些字符：\\ / : * ? \" < > |"
                         return@TextButton
                     }
-                    val ok = viewModel.renameItem(item, trimmed)
-                    if (ok) {
-                        showRenameDialog = null
-                        renameError = null
-                    } else {
-                        renameError = "文件夹名冲突，请换一个名称"
+                    // 改名涉及 SAF 重命名，走 IO；结果回调再关对话框
+                    viewModel.renameItem(item, trimmed) { ok ->
+                        if (ok) {
+                            showRenameDialog = null
+                            renameError = null
+                        } else {
+                            renameError = "文件夹名冲突，请换一个名称"
+                        }
                     }
                 }) { Text("确定") }
             },
@@ -221,8 +161,8 @@ fun MainScreen(
             text = { Text("确定删除事项「${item.meta.name}」？所有文件将移入回收站") },
             confirmButton = {
                 TextButton(onClick = {
-                    viewModel.deleteItem(item)
                     showDeleteDialog = null
+                    viewModel.deleteItem(item)
                 }) { Text("确定删除", color = MaterialTheme.colorScheme.error) }
             },
             dismissButton = {
@@ -231,6 +171,117 @@ fun MainScreen(
         )
     }
 
+}
+
+// ═══════════════════════════════════════════════════════════
+// 顶部栏（独立 composable：只订阅 query）
+// ═══════════════════════════════════════════════════════════
+
+@Composable
+private fun MainTopBar(
+    viewModel: MainViewModel,
+    onOpenCreate: () -> Unit,
+    onOpenSettings: () -> Unit,
+) {
+    val query by viewModel.query.collectAsState()
+
+    Row(
+        modifier = Modifier
+            .fillMaxWidth()
+            .statusBarsPadding()
+            .padding(horizontal = 8.dp, vertical = 4.dp),
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        OutlinedTextField(
+            value = query,
+            onValueChange = { viewModel.onQueryChange(it) },
+            modifier = Modifier.weight(1f),
+            placeholder = { Text("搜索事项") },
+            leadingIcon = { Icon(Icons.Default.Search, contentDescription = "搜索") },
+            trailingIcon = {
+                if (query.isNotEmpty()) {
+                    IconButton(onClick = { viewModel.onQueryChange("") }) {
+                        Icon(Icons.Default.Clear, contentDescription = "清除")
+                    }
+                }
+            },
+            singleLine = true,
+        )
+        Spacer(modifier = Modifier.width(4.dp))
+        IconButton(onClick = onOpenCreate) {
+            Icon(Icons.Default.Add, contentDescription = "新建事项")
+        }
+        IconButton(onClick = onOpenSettings) {
+            Icon(Icons.Default.Settings, contentDescription = "设置")
+        }
+    }
+}
+
+// ═══════════════════════════════════════════════════════════
+// 列表区（独立 composable：只订阅 filteredItems）
+// ═══════════════════════════════════════════════════════════
+
+@Composable
+private fun MainContent(
+    viewModel: MainViewModel,
+    padding: PaddingValues,
+    onOpenDetail: (Int) -> Unit,
+    onLongPressItem: (Item) -> Unit,
+    menuExpanded: Boolean,
+    menuTargetItem: Item?,
+    onMenuDismiss: () -> Unit,
+    onMenuRename: (Item) -> Unit,
+    onMenuDelete: (Item) -> Unit,
+) {
+    val filteredItems by viewModel.filteredItems.collectAsState()
+    val loading by viewModel.loading.collectAsState()
+
+    if (filteredItems.isEmpty()) {
+        Box(
+            modifier = Modifier
+                .fillMaxSize()
+                .padding(padding),
+            contentAlignment = Alignment.Center,
+        ) {
+            Text(
+                if (loading) "正在读取…" else "还没有事项，点右上角 + 新建",
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+            )
+        }
+    } else {
+        LazyColumn(
+            modifier = Modifier
+                .fillMaxSize()
+                .padding(padding),
+            contentPadding = PaddingValues(vertical = 4.dp),
+        ) {
+            items(filteredItems, key = { it.folder.uri.toString() }) { item ->
+                ItemRow(
+                    item = item,
+                    onLongClick = { onLongPressItem(item) },
+                    onClick = { onOpenDetail(item.meta.id) },
+                )
+
+                // 长按菜单：只在命中的那一行才创建 DropdownMenu，
+                // 不再给每一行都常驻一个 Popup 容器。
+                if (menuExpanded && menuTargetItem?.folder?.uri == item.folder.uri) {
+                    DropdownMenu(
+                        expanded = true,
+                        onDismissRequest = onMenuDismiss,
+                    ) {
+                        DropdownMenuItem(
+                            text = { Text("改名") },
+                            onClick = { onMenuRename(item) },
+                        )
+                        DropdownMenuItem(
+                            text = { Text("删除", color = MaterialTheme.colorScheme.error) },
+                            onClick = { onMenuDelete(item) },
+                        )
+                    }
+                }
+            }
+        }
+    }
 }
 
 // ═══════════════════════════════════════════════════════════
