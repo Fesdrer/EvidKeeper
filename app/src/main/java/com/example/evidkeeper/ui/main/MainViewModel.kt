@@ -48,9 +48,15 @@ class MainViewModel(private val storageManager: StorageManager) : ViewModel() {
      */
     fun load(forceRescan: Boolean = false) {
         viewModelScope.launch {
-            val list = storageManager.listItems(forceRescan)
+            // SAF 权限被撤销 / provider 异常会抛，不能让它把 loading 永久卡在 true
+            val list = try {
+                storageManager.listItems(forceRescan)
+            } catch (e: Exception) {
+                _items.value
+            } finally {
+                _loading.value = false
+            }
             _items.value = list
-            _loading.value = false
         }
     }
 

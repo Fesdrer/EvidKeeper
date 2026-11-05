@@ -38,8 +38,14 @@ class DetailViewModel(
      */
     fun load(forceRescan: Boolean = false) {
         viewModelScope.launch {
-            _item.value = storageManager.listItems(forceRescan).find { it.meta.id == itemId }
-            _loading.value = false
+            // SAF 权限被撤销 / provider 异常会抛，不能让它把 loading 永久卡在 true
+            try {
+                _item.value = storageManager.listItems(forceRescan).find { it.meta.id == itemId }
+            } catch (e: Exception) {
+                _toastMessage.value = "读取失败：${e.message ?: "存储目录不可用"}"
+            } finally {
+                _loading.value = false
+            }
         }
     }
 
