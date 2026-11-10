@@ -98,14 +98,24 @@
 | PDF（扫描件/图片型） | 渲染首页为图片 → 发送给视觉模型 |
 | TXT | 读取文字内容 → 发送给模型 |
 
+## 版本记录
+
+| 版本 | 主要变化 |
+|---|---|
+| v1.2 | 修复扫描异常时 loading 永久卡住的问题；优化各窗口打开/关闭的卡顿 |
+| v1.1 | 更早版本见 `git log` |
+
 ## 构建
 
 ```bash
 # 克隆项目后用 Android Studio 打开，或命令行：
-./gradlew assembleDebug
+./gradlew assembleDebug      # 调试包 → EvidKeeper-v1.2-debug.apk
+./gradlew assembleRelease    # Release 包 → EvidKeeper-v1.2.apk
 ```
 
-需要在 `local.properties` 中配置 Android SDK 路径。签名打包 release（Android Studio：Build → Generate Signed APK）输出为 `EvidKeeper-v1.1.apk`。
+需要在 `local.properties` 中配置 Android SDK 路径。Release 包默认未签名，需用签名文件签名后才能安装（Android Studio：Build → Generate Signed App Bundle / APK）。
+
+国内网络环境下已配置镜像加速：`gradle/wrapper/gradle-wrapper.properties` 通过腾讯云镜像下载 Gradle 本体，`settings.gradle.kts` 优先使用阿里云 Maven 仓库，官方源仅作兜底。
 
 ## 依赖
 
